@@ -9,10 +9,10 @@ from aiohttp import web
 TELEGRAM_BOT_TOKEN = "7636233675:AAGwIkuHZV7n5ndyQ0DgiN5XfjPHHDXMpDA"
 
 # Webhook settings
-WEBHOOK_HOST = "https://unuion-portfolio.onrender.com"  # Replace with your domain or ngrok URL
-WEBHOOK_PORT = 8443  # Standard port for HTTPS
-WEBHOOK_PATH = f"/{TELEGRAM_BOT_TOKEN}"  # Unique path for webhook
+WEBHOOK_HOST = "unuion-portfolio.onrender.com"  # Replace with your Render domain
+WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
 
 # API URL for fetching portfolio data
 API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/main-jni9xrqfbu"
@@ -176,7 +176,7 @@ async def update_portfolio_manually(update: Update, context: ContextTypes.DEFAUL
         previous_portfolio = current_portfolio
     else:
         print("Failed to fetch portfolio data.")
-        
+
 async def webhook_handler(request):
     """Handle incoming webhook updates."""
     bot_application = request.app["bot_application"]
@@ -188,9 +188,8 @@ async def main():
     """Main function to start the bot with webhook."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add command handlers
+    # Add command and message handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("update", update_portfolio_manually))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_user_chat_id))
 
     # Set the webhook
@@ -204,7 +203,7 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
+    site = web.TCPSite(runner, host="0.0.0.0", port=8443)  # Render defaults
     await site.start()
 
     print(f"Webhook listening at {WEBHOOK_URL}")
