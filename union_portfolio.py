@@ -1,12 +1,18 @@
 import requests
-import time
 from datetime import datetime
 import logging
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes, JobQueue
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from aiohttp import web
 
 # Telegram bot setup
 TELEGRAM_BOT_TOKEN = "7636233675:AAGwIkuHZV7n5ndyQ0DgiN5XfjPHHDXMpDA"
+
+# Webhook settings
+WEBHOOK_HOST = "https://broken-brook-58af.mr-kirindyasov28.workers.dev/"  # Replace with your domain or ngrok URL
+WEBHOOK_PORT = 8443  # Standard port for HTTPS
+WEBHOOK_PATH = f"/{TELEGRAM_BOT_TOKEN}"  # Unique path for webhook
+WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 # API URL for fetching portfolio data
 API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/main-jni9xrqfbu"
@@ -58,9 +64,9 @@ def get_portfolio_summary(portfolio):
             for tx in token.get("transactions", [])
             if tx["transactionType"] == "BUY"
         )
-        current_profit_usd = float(token["unrealizedProfit"]["USD"])
-        current_profit_percent = float(token["unrealizedProfitPercent"]["USD"])
-        a = float(token["unrealizedProfit"]["USD"])
+        current_profit_usd = float(token.get("unrealizedProfit", {}).get("usd", 0))
+        current_profit_percent = float(token.get("unrealizedProfitPercent", {}).get("usd", 0))
+
         summary.append(
             f"Symbol: {symbol}\n"
             f"Total Invested: {total_invested:.2f} USD\n"
@@ -68,7 +74,6 @@ def get_portfolio_summary(portfolio):
         )
 
     return "\n\n".join(summary)
-
 
 def analyze_changes(current_portfolio, previous_portfolio):
     """Analyze the portfolio for changes."""
@@ -135,13 +140,13 @@ def analyze_changes(current_portfolio, previous_portfolio):
     return changes
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /start command to send the current portfolio summary and set the chat ID."""
+    """Handle the /start command to set chat ID and fetch the portfolio summary."""
     global user_chat_id
     user_chat_id = update.message.chat_id
 
     print("/start command received. Fetching portfolio...")
-
     portfolio = fetch_portfolio()
+
     if portfolio:
         print("Portfolio fetched successfully. Generating summary...")
         summary = get_portfolio_summary(portfolio)
@@ -149,66 +154,62 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         print("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
-
-async def update_portfolio(context: ContextTypes.DEFAULT_TYPE):
-    """Job to check portfolio updates."""
+        
+async def update_portfolio_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually triggered update of portfolio."""
     global previous_portfolio
-
-    print(f"[{datetime.now()}] Checking for updates...")
+    print(f"[{datetime.now()}] Checking for updates manually...")
     current_portfolio = fetch_portfolio()
 
     if current_portfolio:
         changes = analyze_changes(current_portfolio, previous_portfolio)
-
         if changes:
             print("\nNew Changes Detected:")
             for change in changes:
                 print(f"- {change}")
                 if user_chat_id:
-                    await send_telegram_message(context.application, change)
+                    await context.bot.send_message(chat_id=user_chat_id, text=f"Update:\n\n{change}")
                 else:
                     print("No user chat ID set. Unable to send update.")
-
-        previous_portfolio = current_portfolio  # Only update if the fetch was successful
+        else:
+            print("No changes detected.")
+        previous_portfolio = current_portfolio
     else:
-        print("Failed to fetch portfolio data. Keeping the previous portfolio intact.")
+        print("Failed to fetch portfolio data.")
+        
+async def webhook_handler(request):
+    """Handle incoming webhook updates."""
+    bot_application = request.app["bot_application"]
+    update = await request.json()
+    await bot_application.process_update(Update.de_json(update, bot_application.bot))
+    return web.Response(text="OK")
 
 async def main():
-    """Main function to start the bot."""
+    """Main function to start the bot with webhook."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add command and message handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("update", update_portfolio_manually))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_user_chat_id))
 
-    # Schedule the portfolio update loop
-    print("Scheduling portfolio update job...")
-    application.job_queue.run_repeating(update_portfolio, interval=120)  # Run every 2 minutes
+    # Set the webhook
+    print("Setting webhook...")
+    await application.bot.set_webhook(url=WEBHOOK_URL)
 
-    print("Starting the bot...")
-    await application.initialize()
-    try:
-        await application.start()
-        await application.updater.start_polling()  # This line ensures polling runs indefinitely
-        print("Bot is running... Press Ctrl+C to stop.")
-        await asyncio.Event().wait()  # Keep the event loop alive
-    except KeyboardInterrupt:
-        print("Bot shutting down...")
-    finally:
-        await application.stop()
-        print("Bot has stopped.")
+    # Start the webhook server
+    app = web.Application()
+    app["bot_application"] = application
+    app.router.add_post(WEBHOOK_PATH, webhook_handler)
 
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
+    await site.start()
+
+    print(f"Webhook listening at {WEBHOOK_URL}")
+    await asyncio.Event().wait()  # Keep the webhook server running
 
 if __name__ == "__main__":
     import asyncio
-
-    try:
-        # If there's no running event loop, start one
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(main())
-    except RuntimeError as e:
-        if str(e).startswith("This event loop is already running"):
-            print("Running main() using create_task due to existing event loop.")
-            asyncio.create_task(main())
-        else:
-            raise
+    asyncio.run(main())
