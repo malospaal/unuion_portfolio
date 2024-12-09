@@ -9,7 +9,7 @@ from aiohttp import web
 TELEGRAM_BOT_TOKEN = "7636233675:AAGwIkuHZV7n5ndyQ0DgiN5XfjPHHDXMpDA"
 
 # Webhook settings
-WEBHOOK_HOST = "https://broken-brook-58af.mr-kirindyasov28.workers.dev/"  # Replace with your domain or ngrok URL
+WEBHOOK_HOST = "https://unuion-portfolio.onrender.com"  # Replace with your domain or ngrok URL
 WEBHOOK_PORT = 8443  # Standard port for HTTPS
 WEBHOOK_PATH = f"/{TELEGRAM_BOT_TOKEN}"  # Unique path for webhook
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
