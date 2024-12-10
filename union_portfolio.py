@@ -69,7 +69,6 @@ def get_portfolio_summary(portfolio):
 
     return "\n\n".join(summary)
 
-
 def analyze_changes(current_portfolio, previous_portfolio):
     """Analyze the portfolio for changes."""
     if previous_portfolio is None:
@@ -197,7 +196,6 @@ async def main():
     finally:
         await application.stop()
         print("Bot has stopped.")
-
 
 if __name__ == "__main__":
     import asyncio
