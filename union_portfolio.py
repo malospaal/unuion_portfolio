@@ -16,7 +16,7 @@ WEBHOOK_PATH = f"/webhook"
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 # API URL for fetching portfolio data
-API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/main-jni9xrqfbu"
+API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/cryptus-investments-jaflttu6aa"
 
 # Set up logging
 logging.basicConfig(
@@ -243,7 +243,7 @@ async def main():
     site = web.TCPSite(runner, host="0.0.0.0", port=8443)
     await site.start()
 
-    scheduler.add_job(update_portfolio, "interval", minutes=2)
+    scheduler.add_job(update_portfolio, "interval", hours=1)
     scheduler.start()
 
     logger.info(f"Webhook listening at {WEBHOOK_URL}")
