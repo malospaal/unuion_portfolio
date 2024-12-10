@@ -105,7 +105,6 @@ def analyze_changes(current_portfolio, previous_portfolio):
         # Find the corresponding token in the previous portfolio
         prev_token = next((p for p in previous_portfolio.get("portfolios", []) if p["id"] == current_token["id"]), None)
 
-        # If token is new, report all data
         if not prev_token:
             logger.info(f"New token detected: {current_token['symbol']}")
             changes.append(
@@ -115,24 +114,34 @@ def analyze_changes(current_portfolio, previous_portfolio):
             )
             continue
 
-        # Compare the balance/quantity changes
-        quantity_diff = float(current_token["quantity"]) - float(prev_token["quantity"])
-        if quantity_diff > 0:
-            logger.debug(f"Detected BUY for {current_token['symbol']}, quantity increased by: {quantity_diff:.2f}")
+        # Check for changes in quantity
+        current_quantity = float(current_token.get("quantity", 0))
+        previous_quantity = float(prev_token.get("quantity", 0))
+        if current_quantity != previous_quantity:
+            quantity_diff = current_quantity - previous_quantity
+            change_type = "BUY" if quantity_diff > 0 else "SELL"
+            logger.debug(f"Detected {change_type} for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
             changes.append(
-                f"BUY detected for {current_token['symbol']}\n"
-                f"Quantity Change: +{quantity_diff:.2f}\n"
-                f"New Quantity: {float(current_token['quantity']):.2f}\n"
-                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
-            )
-        elif quantity_diff < 0:
-            logger.debug(f"Detected SELL for {current_token['symbol']}, quantity decreased by: {abs(quantity_diff):.2f}")
-            changes.append(
-                f"SELL detected for {current_token['symbol']}\n"
+                f"{change_type} detected for {current_token['symbol']}\n"
                 f"Quantity Change: {quantity_diff:.2f}\n"
-                f"New Quantity: {float(current_token['quantity']):.2f}\n"
+                f"New Quantity: {current_quantity:.2f}\n"
                 f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
             )
+
+        # Check for new transactions
+        prev_transactions = {tx['id']: tx for tx in prev_token.get("transactions", [])}
+        for transaction in current_token.get("transactions", []):
+            if transaction['id'] not in prev_transactions:
+                transaction_type = transaction['transactionType']
+                quantity = float(transaction['quantity'])
+                price = float(transaction['priceUsd'])
+                logger.debug(f"Detected new transaction for {current_token['symbol']}: {transaction}")
+                changes.append(
+                    f"{transaction_type} of {current_token['symbol']}\n"
+                    f"Quantity: {quantity:.2f}\n"
+                    f"Price: {price:.2f} USD\n"
+                    f"Total: {quantity * price:.2f} USD\n"
+                )
 
     logger.info(f"Detected {len(changes)} changes.")
     return changes
@@ -145,6 +154,7 @@ async def update_portfolio():
     current_portfolio = fetch_portfolio()
     if current_portfolio:
         logger.debug(f"Fetched portfolio data during update check: {current_portfolio}")
+        logger.debug(f"Previous portfolio state: {previous_portfolio}")
 
         changes = analyze_changes(current_portfolio, previous_portfolio)
         if changes:
@@ -164,7 +174,7 @@ async def update_portfolio():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command to send the current portfolio summary and set the chat ID."""
-    global user_chat_id
+    global user_chat_id, previous_portfolio
     user_chat_id = update.message.chat_id
 
     logger.info("/start command received. Fetching portfolio...")
@@ -173,6 +183,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("Portfolio fetched successfully. Generating summary...")
         summary = get_portfolio_summary(portfolio)
         await context.bot.send_message(chat_id=user_chat_id, text=f"Portfolio Summary:\n\n{summary}")
+        
+        # Synchronize previous_portfolio
+        previous_portfolio = portfolio
+        logger.debug(f"Synchronized previous_portfolio with fetched data: {previous_portfolio}")
     else:
         logger.error("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
