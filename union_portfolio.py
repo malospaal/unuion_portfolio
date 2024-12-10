@@ -7,6 +7,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 
 # Telegram bot setup
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+PORT = int(os.getenv("PORT", 8080))  # Default to port 8080 if PORT is not set
 
 # API URL for fetching portfolio data
 API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/main-jni9xrqfbu"
