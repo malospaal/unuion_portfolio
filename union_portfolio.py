@@ -4,6 +4,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from aiohttp import web
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Telegram bot setup
 TELEGRAM_BOT_TOKEN = "7636233675:AAGwIkuHZV7n5ndyQ0DgiN5XfjPHHDXMpDA"
@@ -24,6 +25,9 @@ logging.basicConfig(
 # Store the initial state of the portfolio
 previous_portfolio = None
 user_chat_id = None
+
+# Initialize the scheduler
+scheduler = AsyncIOScheduler()
 
 async def set_user_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set the chat ID from the user sending a message."""
@@ -154,6 +158,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
 
+async def update_portfolio():
+    """Check for portfolio updates periodically and notify on changes."""
+    global previous_portfolio
+    print("Checking for portfolio updates...")
+
+    current_portfolio = fetch_portfolio()
+    if current_portfolio:
+        changes = analyze_changes(current_portfolio, previous_portfolio)
+        if changes:
+            print("New changes detected:")
+            for change in changes:
+                print(change)
+                if user_chat_id:
+                    await send_telegram_message(application, f"Portfolio Update:\n\n{change}")
+                else:
+                    print("No user chat ID set. Unable to send update.")
+        else:
+            print("No changes detected.")
+        previous_portfolio = current_portfolio
+    else:
+        print("Failed to fetch portfolio data.")
+
 async def webhook_handler(request):
     """Handle incoming webhook updates."""
     bot_application = request.app["bot_application"]
@@ -184,12 +210,3 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=8443)
-    await site.start()
-
-    print(f"Webhook listening at {WEBHOOK_URL}")
-    await asyncio.Event().wait()  # Keep the webhook server running
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
