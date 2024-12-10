@@ -1,4 +1,4 @@
-requests
-python-telegram-bot[job-queue]
+python-telegram-bot==20.3
 apscheduler
 aiohttp
+requests
