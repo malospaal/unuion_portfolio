@@ -47,6 +47,85 @@ async def send_telegram_message(app, message):
     else:
         logger.warning("No user chat ID set. Unable to send message.")
 
+# Define analyze_changes above update_portfolio to ensure proper scope
+def analyze_changes(current_portfolio, previous_portfolio):
+    """Analyze the portfolio for changes."""
+    if previous_portfolio is None:
+        logger.info("Initial portfolio state loaded. No changes to analyze.")
+        return []
+
+    excluded_symbols = {"USD", "USDT", "USDC"}
+    changes = []
+
+    logger.debug(f"Current portfolio size: {len(current_portfolio.get('portfolios', []))}")
+    logger.debug(f"Previous portfolio size: {len(previous_portfolio.get('portfolios', []))}")
+
+    for current_token in current_portfolio.get("portfolios", []):
+        if current_token["symbol"] in excluded_symbols:
+            continue
+
+        # Find the corresponding token in the previous portfolio
+        prev_token = next((p for p in previous_portfolio.get("portfolios", []) if p["id"] == current_token["id"]), None)
+
+        if not prev_token:
+            logger.info(f"New token detected: {current_token['symbol']}")
+            for transaction in current_token.get("transactions", []):
+                transaction_type = transaction['transactionType']
+                quantity = float(transaction['quantity'])
+                price = float(transaction['priceUsd'])
+                logger.debug(f"New transaction for {current_token['symbol']}: {transaction}")
+                changes.append(
+                    f"{transaction_type} of {current_token['symbol']}\n"
+                    f"Quantity: {quantity:.2f}\n"
+                    f"Price: {price:.2f} USD\n"
+                    f"Total: {quantity * price:.2f} USD\n"
+                )
+            continue
+
+        # Check for new transactions (only log transaction details)
+        prev_transactions = {tx['id']: tx for tx in prev_token.get("transactions", [])}
+        for transaction in current_token.get("transactions", []):
+            if transaction['id'] not in prev_transactions:
+                transaction_type = transaction['transactionType']
+                quantity = float(transaction['quantity'])
+                price = float(transaction['priceUsd'])
+                logger.debug(f"Detected new transaction for {current_token['symbol']}: {transaction}")
+                changes.append(
+                    f"{transaction_type} of {current_token['symbol']}\n"
+                    f"Quantity: {quantity:.2f}\n"
+                    f"Price: {price:.2f} USD\n"
+                    f"Total: {quantity * price:.2f} USD\n"
+                )
+
+    logger.info(f"Detected {len(changes)} changes.")
+    return changes
+
+async def update_portfolio():
+    """Check for portfolio updates periodically and notify on changes."""
+    global previous_portfolio, application
+    logger.debug(f"[{datetime.now()}] Checking for portfolio updates...")
+
+    current_portfolio = fetch_portfolio()
+    if current_portfolio:
+        logger.debug(f"Fetched portfolio. Tokens in portfolio: {len(current_portfolio.get('portfolios', []))}")
+        logger.debug(f"Previous portfolio size: {len(previous_portfolio.get('portfolios', [])) if previous_portfolio else 'None'}")
+
+        changes = analyze_changes(current_portfolio, previous_portfolio)
+        if changes:
+            logger.info(f"{len(changes)} changes detected. Sending updates.")
+            for change in changes:
+                logger.info(f"Change details: {change}")
+                if user_chat_id:
+                    await send_telegram_message(application, f"Portfolio Update:\n\n{change}")
+                else:
+                    logger.warning("No user chat ID set. Unable to send update.")
+        else:
+            logger.debug("No changes detected in portfolio.")
+        previous_portfolio = current_portfolio
+        logger.debug(f"Updated previous_portfolio state.")
+    else:
+        logger.error("Failed to fetch portfolio data during update check.")
+
 def fetch_portfolio():
     """Fetch the portfolio data from the API."""
     try:
