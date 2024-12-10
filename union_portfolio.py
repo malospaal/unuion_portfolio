@@ -87,66 +87,6 @@ def get_portfolio_summary(portfolio):
     logger.debug("Portfolio summary generated.")
     return "\n\n".join(summary)
 
-def analyze_changes(current_portfolio, previous_portfolio):
-    """Analyze the portfolio for changes."""
-    if previous_portfolio is None:
-        logger.info("Initial portfolio state loaded. No changes to analyze.")
-        return []
-
-    excluded_symbols = {"USD", "USDT", "USDC"}
-    changes = []
-
-    logger.debug(f"Current portfolio size: {len(current_portfolio.get('portfolios', []))}")
-    logger.debug(f"Previous portfolio size: {len(previous_portfolio.get('portfolios', []))}")
-
-    for current_token in current_portfolio.get("portfolios", []):
-        if current_token["symbol"] in excluded_symbols:
-            continue
-
-        # Find the corresponding token in the previous portfolio
-        prev_token = next((p for p in previous_portfolio.get("portfolios", []) if p["id"] == current_token["id"]), None)
-
-        if not prev_token:
-            logger.info(f"New token detected: {current_token['symbol']}")
-            changes.append(
-                f"New token added: {current_token['symbol']}\n"
-                f"Quantity: {float(current_token['quantity']):.2f}\n"
-                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
-            )
-            continue
-
-        # Check for changes in quantity
-        current_quantity = float(current_token.get("quantity", 0))
-        previous_quantity = float(prev_token.get("quantity", 0))
-        if current_quantity != previous_quantity:
-            quantity_diff = current_quantity - previous_quantity
-            change_type = "BUY" if quantity_diff > 0 else "SELL"
-            logger.debug(f"Detected {change_type} for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
-            changes.append(
-                f"{change_type} detected for {current_token['symbol']}\n"
-                f"Quantity Change: {quantity_diff:.2f}\n"
-                f"New Quantity: {current_quantity:.2f}\n"
-                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
-            )
-
-        # Check for new transactions
-        prev_transactions = {tx['id']: tx for tx in prev_token.get("transactions", [])}
-        for transaction in current_token.get("transactions", []):
-            if transaction['id'] not in prev_transactions:
-                transaction_type = transaction['transactionType']
-                quantity = float(transaction['quantity'])
-                price = float(transaction['priceUsd'])
-                logger.debug(f"Detected new transaction for {current_token['symbol']}: {transaction}")
-                changes.append(
-                    f"{transaction_type} of {current_token['symbol']}\n"
-                    f"Quantity: {quantity:.2f}\n"
-                    f"Price: {price:.2f} USD\n"
-                    f"Total: {quantity * price:.2f} USD\n"
-                )
-
-    logger.info(f"Detected {len(changes)} changes.")
-    return changes
-
 async def update_portfolio():
     """Check for portfolio updates periodically and notify on changes."""
     global previous_portfolio, application
