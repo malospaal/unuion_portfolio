@@ -162,7 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def update_portfolio():
     """Check for portfolio updates periodically and notify on changes."""
     global previous_portfolio
-    print("Checking for portfolio updates...")
+    print(f"[{datetime.now()}] Checking for portfolio updates...")
 
     current_portfolio = fetch_portfolio()
     if current_portfolio:
@@ -211,3 +211,16 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=8443)  # Explicitly set port to 8443
+    await site.start()
+
+    # Schedule periodic updates every 2 minutes
+    scheduler.add_job(update_portfolio, "interval", minutes=2)
+    scheduler.start()
+
+    print(f"Webhook listening at {WEBHOOK_URL}")
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
