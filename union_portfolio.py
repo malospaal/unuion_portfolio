@@ -95,7 +95,9 @@ def analyze_changes(current_portfolio, previous_portfolio):
     excluded_symbols = {"USD", "USDT", "USDC"}
     changes = []
 
-    logger.debug("Analyzing portfolio changes...")
+    logger.debug(f"Current portfolio for comparison: {current_portfolio}")
+    logger.debug(f"Previous portfolio for comparison: {previous_portfolio}")
+
     for current_token in current_portfolio.get("portfolios", []):
         if current_token["symbol"] in excluded_symbols:
             continue
@@ -105,7 +107,7 @@ def analyze_changes(current_portfolio, previous_portfolio):
             logger.info(f"New token detected: {current_token['symbol']}")
             for transaction in current_token.get("transactions", []):
                 if transaction['transactionType'] == 'BUY':
-                    logger.debug(f"New BUY transaction: {transaction}")
+                    logger.debug(f"New BUY transaction detected: {transaction}")
                     changes.append(
                         f"BUY of {current_token['symbol']}\n"
                         f"Quantity: {float(transaction['quantity']):.2f}\n"
@@ -115,31 +117,11 @@ def analyze_changes(current_portfolio, previous_portfolio):
                     )
         else:
             quantity_diff = float(current_token["quantity"]) - float(prev_token["quantity"])
+            logger.debug(f"Quantity difference for {current_token['symbol']}: {quantity_diff}")
             if quantity_diff > 0:
-                logger.debug(f"Detected BUY in {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
-                for transaction in current_token.get("transactions", []):
-                    if transaction['transactionType'] == 'BUY' and float(transaction['quantity']) == quantity_diff:
-                        changes.append(
-                            f"BUY of {current_token['symbol']}\n"
-                            f"Quantity: {float(transaction['quantity']):.2f}\n"
-                            f"Price: {float(transaction['priceUsd']):.2f} USD\n"
-                            f"Money spent: {float(transaction['quantity']) * float(transaction['priceUsd']):.2f} USD\n"
-                            f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
-                        )
+                logger.debug(f"Detected BUY for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
             elif quantity_diff < 0:
-                logger.debug(f"Detected SELL in {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
-                for transaction in current_token.get("transactions", []):
-                    if transaction['transactionType'] == 'SELL' and float(transaction['quantity']) <= abs(quantity_diff):
-                        changes.append(
-                            f"SELL of {current_token['symbol']}\n"
-                            f"Quantity: {float(transaction['quantity']):.2f}\n"
-                            f"Price: {float(transaction['priceUsd']):.2f} USD\n"
-                            f"Money received: {float(transaction['quantity']) * float(transaction['priceUsd']):.2f} USD\n"
-                            f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
-                        )
-                        quantity_diff += float(transaction['quantity'])
-
-    logger.info(f"Detected {len(changes)} changes.")
+                logger.debug(f"Detected SELL for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
     return changes
 
 async def update_portfolio():
@@ -149,7 +131,8 @@ async def update_portfolio():
 
     current_portfolio = fetch_portfolio()
     if current_portfolio:
-        logger.debug("Portfolio fetched successfully for updates.")
+        logger.debug(f"Fetched portfolio data during update check: {current_portfolio}")
+
         changes = analyze_changes(current_portfolio, previous_portfolio)
         if changes:
             logger.info(f"{len(changes)} changes detected. Sending updates.")
@@ -162,6 +145,7 @@ async def update_portfolio():
         else:
             logger.debug("No changes detected in portfolio.")
         previous_portfolio = current_portfolio
+        logger.debug(f"Updated previous_portfolio state: {previous_portfolio}")
     else:
         logger.error("Failed to fetch portfolio data during update check.")
 
