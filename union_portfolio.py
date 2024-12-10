@@ -102,26 +102,39 @@ def analyze_changes(current_portfolio, previous_portfolio):
         if current_token["symbol"] in excluded_symbols:
             continue
 
+        # Find the corresponding token in the previous portfolio
         prev_token = next((p for p in previous_portfolio.get("portfolios", []) if p["id"] == current_token["id"]), None)
+
+        # If token is new, report all data
         if not prev_token:
             logger.info(f"New token detected: {current_token['symbol']}")
-            for transaction in current_token.get("transactions", []):
-                if transaction['transactionType'] == 'BUY':
-                    logger.debug(f"New BUY transaction detected: {transaction}")
-                    changes.append(
-                        f"BUY of {current_token['symbol']}\n"
-                        f"Quantity: {float(transaction['quantity']):.2f}\n"
-                        f"Price: {float(transaction['priceUsd']):.2f} USD\n"
-                        f"Money spent: {float(transaction['quantity']) * float(transaction['priceUsd']):.2f} USD\n"
-                        f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
-                    )
-        else:
-            quantity_diff = float(current_token["quantity"]) - float(prev_token["quantity"])
-            logger.debug(f"Quantity difference for {current_token['symbol']}: {quantity_diff}")
-            if quantity_diff > 0:
-                logger.debug(f"Detected BUY for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
-            elif quantity_diff < 0:
-                logger.debug(f"Detected SELL for {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
+            changes.append(
+                f"New token added: {current_token['symbol']}\n"
+                f"Quantity: {float(current_token['quantity']):.2f}\n"
+                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
+            )
+            continue
+
+        # Compare the balance/quantity changes
+        quantity_diff = float(current_token["quantity"]) - float(prev_token["quantity"])
+        if quantity_diff > 0:
+            logger.debug(f"Detected BUY for {current_token['symbol']}, quantity increased by: {quantity_diff:.2f}")
+            changes.append(
+                f"BUY detected for {current_token['symbol']}\n"
+                f"Quantity Change: +{quantity_diff:.2f}\n"
+                f"New Quantity: {float(current_token['quantity']):.2f}\n"
+                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
+            )
+        elif quantity_diff < 0:
+            logger.debug(f"Detected SELL for {current_token['symbol']}, quantity decreased by: {abs(quantity_diff):.2f}")
+            changes.append(
+                f"SELL detected for {current_token['symbol']}\n"
+                f"Quantity Change: {quantity_diff:.2f}\n"
+                f"New Quantity: {float(current_token['quantity']):.2f}\n"
+                f"Current Value: {float(current_token.get('valueUsd', 0)):.2f} USD\n"
+            )
+
+    logger.info(f"Detected {len(changes)} changes.")
     return changes
 
 async def update_portfolio():
