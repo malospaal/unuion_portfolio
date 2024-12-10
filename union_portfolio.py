@@ -3,11 +3,17 @@ import os
 from datetime import datetime
 import logging
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes, JobQueue
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from aiohttp import web
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Telegram bot setup
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-PORT = int(os.getenv("PORT", 8080))  # Default to port 8080 if PORT is not set
+
+# Webhook settings
+WEBHOOK_HOST = "unuion-portfolio.onrender.com"  # Replace with your Render domain
+WEBHOOK_PATH = f"/webhook"
+WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 # API URL for fetching portfolio data
 API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShare/main-jni9xrqfbu"
@@ -20,6 +26,9 @@ logging.basicConfig(
 # Store the initial state of the portfolio
 previous_portfolio = None
 user_chat_id = None
+
+# Initialize the scheduler
+scheduler = AsyncIOScheduler()
 
 async def set_user_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set the chat ID from the user sending a message."""
@@ -59,9 +68,9 @@ def get_portfolio_summary(portfolio):
             for tx in token.get("transactions", [])
             if tx["transactionType"] == "BUY"
         )
-        current_profit_usd = float(token["unrealizedProfit"]["USD"])
-        current_profit_percent = float(token["unrealizedProfitPercent"]["USD"])
-        a = float(token["unrealizedProfit"]["USD"])
+        current_profit_usd = float(token.get("unrealizedProfit", {}).get("usd", 0))
+        current_profit_percent = float(token.get("unrealizedProfitPercent", {}).get("usd", 0))
+
         summary.append(
             f"Symbol: {symbol}\n"
             f"Total Invested: {total_invested:.2f} USD\n"
@@ -150,64 +159,68 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
 
-async def update_portfolio(context: ContextTypes.DEFAULT_TYPE):
-    """Job to check portfolio updates."""
+async def update_portfolio():
+    """Check for portfolio updates periodically and notify on changes."""
     global previous_portfolio
+    print(f"[{datetime.now()}] Checking for portfolio updates...")
 
-    print(f"[{datetime.now()}] Checking for updates...")
     current_portfolio = fetch_portfolio()
-
     if current_portfolio:
         changes = analyze_changes(current_portfolio, previous_portfolio)
-
         if changes:
-            print("\nNew Changes Detected:")
+            print("New changes detected:")
             for change in changes:
-                print(f"- {change}")
+                print(change)
                 if user_chat_id:
-                    await send_telegram_message(context.application, change)
+                    await send_telegram_message(application, f"Portfolio Update:\n\n{change}")
                 else:
                     print("No user chat ID set. Unable to send update.")
-
-        previous_portfolio = current_portfolio  # Only update if the fetch was successful
+        else:
+            print("No changes detected.")
+        previous_portfolio = current_portfolio
     else:
-        print("Failed to fetch portfolio data. Keeping the previous portfolio intact.")
+        print("Failed to fetch portfolio data.")
+
+async def webhook_handler(request):
+    """Handle incoming webhook updates."""
+    bot_application = request.app["bot_application"]
+    update = await request.json()
+    await bot_application.process_update(Update.de_json(update, bot_application.bot))
+    return web.Response(text="OK")
 
 async def main():
-    """Main function to start the bot."""
+    """Main function to start the bot with webhook."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add command and message handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_user_chat_id))
 
-    # Schedule the portfolio update loop
-    print("Scheduling portfolio update job...")
-    application.job_queue.run_repeating(update_portfolio, interval=120)  # Run every 2 minutes
-
-    print("Starting the bot...")
+    # Explicitly initialize the application
+    print("Initializing application...")
     await application.initialize()
-    try:
-        await application.start()
-        await application.updater.start_polling()  # This line ensures polling runs indefinitely
-        print("Bot is running... Press Ctrl+C to stop.")
-        await asyncio.Event().wait()  # Keep the event loop alive
-    except KeyboardInterrupt:
-        print("Bot shutting down...")
-    finally:
-        await application.stop()
-        print("Bot has stopped.")
+
+    # Set the webhook
+    print("Setting webhook...")
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+
+    # Start the webhook server
+    app = web.Application()
+    app["bot_application"] = application
+    app.router.add_post(WEBHOOK_PATH, webhook_handler)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=8443)  # Explicitly set port to 8443
+    await site.start()
+
+    # Schedule periodic updates every 2 minutes
+    scheduler.add_job(update_portfolio, "interval", minutes=2)
+    scheduler.start()
+
+    print(f"Webhook listening at {WEBHOOK_URL}")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     import asyncio
-
-    try:
-        # If there's no running event loop, start one
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(main())
-    except RuntimeError as e:
-        if str(e).startswith("This event loop is already running"):
-            print("Running main() using create_task due to existing event loop.")
-            asyncio.create_task(main())
-        else:
-            raise
+    asyncio.run(main())
