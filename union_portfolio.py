@@ -20,8 +20,9 @@ API_URL = "https://api2.icodrops.com/portfolio/api/portfolioGroup/individualShar
 
 # Set up logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.DEBUG
 )
+logger = logging.getLogger(__name__)
 
 # Store the initial state of the portfolio
 previous_portfolio = None
@@ -34,23 +35,28 @@ async def set_user_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set the chat ID from the user sending a message."""
     global user_chat_id
     user_chat_id = update.message.chat_id
+    logger.info(f"Chat ID set: {user_chat_id}")
     await context.bot.send_message(chat_id=user_chat_id, text="Chat ID set. You will now receive updates.")
 
 async def send_telegram_message(application: Application, message):
     """Send a message to the specified Telegram chat."""
     if user_chat_id:
+        logger.info(f"Sending message to chat ID {user_chat_id}: {message}")
         await application.bot.send_message(chat_id=user_chat_id, text=message)
     else:
-        print("No user chat ID set. Unable to send message.")
+        logger.warning("No user chat ID set. Unable to send message.")
 
 def fetch_portfolio():
     """Fetch the portfolio data from the API."""
     try:
+        logger.debug(f"Fetching portfolio from {API_URL}")
         response = requests.get(API_URL)
         response.raise_for_status()
-        return response.json()
+        portfolio = response.json()
+        logger.debug(f"Portfolio fetched: {portfolio}")
+        return portfolio
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching portfolio data: {e}")
+        logger.error(f"Error fetching portfolio data: {e}")
         return None
 
 def get_portfolio_summary(portfolio):
@@ -58,6 +64,7 @@ def get_portfolio_summary(portfolio):
     excluded_symbols = {"USD", "USDT", "USDC"}
     summary = []
 
+    logger.debug("Generating portfolio summary...")
     for token in portfolio.get("portfolios", []):
         if token["symbol"] in excluded_symbols:
             continue
@@ -76,27 +83,29 @@ def get_portfolio_summary(portfolio):
             f"Total Invested: {total_invested:.2f} USD\n"
             f"Current Profit: {current_profit_usd:.2f} USD ({current_profit_percent:.2f}%)\n"
         )
-
+    logger.debug("Portfolio summary generated.")
     return "\n\n".join(summary)
 
 def analyze_changes(current_portfolio, previous_portfolio):
     """Analyze the portfolio for changes."""
     if previous_portfolio is None:
-        print("Initial portfolio state loaded.")
+        logger.info("Initial portfolio state loaded. No changes to analyze.")
         return []
 
     excluded_symbols = {"USD", "USDT", "USDC"}
     changes = []
 
-    # Compare portfolios for changes
+    logger.debug("Analyzing portfolio changes...")
     for current_token in current_portfolio.get("portfolios", []):
         if current_token["symbol"] in excluded_symbols:
             continue
 
         prev_token = next((p for p in previous_portfolio.get("portfolios", []) if p["id"] == current_token["id"]), None)
         if not prev_token:
+            logger.info(f"New token detected: {current_token['symbol']}")
             for transaction in current_token.get("transactions", []):
                 if transaction['transactionType'] == 'BUY':
+                    logger.debug(f"New BUY transaction: {transaction}")
                     changes.append(
                         f"BUY of {current_token['symbol']}\n"
                         f"Quantity: {float(transaction['quantity']):.2f}\n"
@@ -105,11 +114,9 @@ def analyze_changes(current_portfolio, previous_portfolio):
                         f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
                     )
         else:
-            # Check for changes in quantity
             quantity_diff = float(current_token["quantity"]) - float(prev_token["quantity"])
-
-            # Handle BUY transactions
             if quantity_diff > 0:
+                logger.debug(f"Detected BUY in {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
                 for transaction in current_token.get("transactions", []):
                     if transaction['transactionType'] == 'BUY' and float(transaction['quantity']) == quantity_diff:
                         changes.append(
@@ -119,9 +126,8 @@ def analyze_changes(current_portfolio, previous_portfolio):
                             f"Money spent: {float(transaction['quantity']) * float(transaction['priceUsd']):.2f} USD\n"
                             f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
                         )
-
-            # Handle SELL transactions
-            if quantity_diff < 0:
+            elif quantity_diff < 0:
+                logger.debug(f"Detected SELL in {current_token['symbol']}, quantity change: {quantity_diff:.2f}")
                 for transaction in current_token.get("transactions", []):
                     if transaction['transactionType'] == 'SELL' and float(transaction['quantity']) <= abs(quantity_diff):
                         changes.append(
@@ -131,55 +137,48 @@ def analyze_changes(current_portfolio, previous_portfolio):
                             f"Money received: {float(transaction['quantity']) * float(transaction['priceUsd']):.2f} USD\n"
                             f"Remaining quantity: {float(current_token['quantity']):.2f}\n"
                         )
-                        quantity_diff += float(transaction['quantity'])  # Update to account for processed transaction
+                        quantity_diff += float(transaction['quantity'])
 
-    # Check for removed tokens
-    for prev_token in previous_portfolio.get("portfolios", []):
-        if prev_token["symbol"] in excluded_symbols:
-            continue
-
-        if not any(p["id"] == prev_token["id"] for p in current_portfolio.get("portfolios", [])):
-            changes.append(f"Token sold out: {prev_token['symbol']} (Symbol: {prev_token['symbol']})")
-
+    logger.info(f"Detected {len(changes)} changes.")
     return changes
+
+async def update_portfolio():
+    """Check for portfolio updates periodically and notify on changes."""
+    global previous_portfolio
+    logger.debug(f"[{datetime.now()}] Checking for portfolio updates...")
+
+    current_portfolio = fetch_portfolio()
+    if current_portfolio:
+        logger.debug("Portfolio fetched successfully for updates.")
+        changes = analyze_changes(current_portfolio, previous_portfolio)
+        if changes:
+            logger.info(f"{len(changes)} changes detected. Sending updates.")
+            for change in changes:
+                logger.info(f"Change details: {change}")
+                if user_chat_id:
+                    await send_telegram_message(application, f"Portfolio Update:\n\n{change}")
+                else:
+                    logger.warning("No user chat ID set. Unable to send update.")
+        else:
+            logger.debug("No changes detected in portfolio.")
+        previous_portfolio = current_portfolio
+    else:
+        logger.error("Failed to fetch portfolio data during update check.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command to send the current portfolio summary and set the chat ID."""
     global user_chat_id
     user_chat_id = update.message.chat_id
 
-    print("/start command received. Fetching portfolio...")
-
+    logger.info("/start command received. Fetching portfolio...")
     portfolio = fetch_portfolio()
     if portfolio:
-        print("Portfolio fetched successfully. Generating summary...")
+        logger.info("Portfolio fetched successfully. Generating summary...")
         summary = get_portfolio_summary(portfolio)
         await context.bot.send_message(chat_id=user_chat_id, text=f"Portfolio Summary:\n\n{summary}")
     else:
-        print("Failed to fetch portfolio data.")
+        logger.error("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
-
-async def update_portfolio():
-    """Check for portfolio updates periodically and notify on changes."""
-    global previous_portfolio
-    print(f"[{datetime.now()}] Checking for portfolio updates...")
-
-    current_portfolio = fetch_portfolio()
-    if current_portfolio:
-        changes = analyze_changes(current_portfolio, previous_portfolio)
-        if changes:
-            print("New changes detected:")
-            for change in changes:
-                print(change)
-                if user_chat_id:
-                    await send_telegram_message(application, f"Portfolio Update:\n\n{change}")
-                else:
-                    print("No user chat ID set. Unable to send update.")
-        else:
-            print("No changes detected.")
-        previous_portfolio = current_portfolio
-    else:
-        print("Failed to fetch portfolio data.")
 
 async def webhook_handler(request):
     """Handle incoming webhook updates."""
@@ -196,12 +195,10 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_user_chat_id))
 
-    # Explicitly initialize the application
-    print("Initializing application...")
+    logger.info("Initializing application...")
     await application.initialize()
 
-    # Set the webhook
-    print("Setting webhook...")
+    logger.info("Setting webhook...")
     await application.bot.set_webhook(url=WEBHOOK_URL)
 
     # Start the webhook server
@@ -211,14 +208,13 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=8443)  # Explicitly set port to 8443
+    site = web.TCPSite(runner, host="0.0.0.0", port=8443)
     await site.start()
 
-    # Schedule periodic updates every 2 minutes
     scheduler.add_job(update_portfolio, "interval", minutes=2)
     scheduler.start()
 
-    print(f"Webhook listening at {WEBHOOK_URL}")
+    logger.info(f"Webhook listening at {WEBHOOK_URL}")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
