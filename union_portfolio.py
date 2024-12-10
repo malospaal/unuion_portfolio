@@ -24,9 +24,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Store the initial state of the portfolio
+# Global variables
 previous_portfolio = None
 user_chat_id = None
+application = None  # Make the application globally accessible
 
 # Initialize the scheduler
 scheduler = AsyncIOScheduler()
@@ -38,11 +39,11 @@ async def set_user_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Chat ID set: {user_chat_id}")
     await context.bot.send_message(chat_id=user_chat_id, text="Chat ID set. You will now receive updates.")
 
-async def send_telegram_message(application: Application, message):
+async def send_telegram_message(app, message):
     """Send a message to the specified Telegram chat."""
     if user_chat_id:
         logger.info(f"Sending message to chat ID {user_chat_id}: {message}")
-        await application.bot.send_message(chat_id=user_chat_id, text=message)
+        await app.bot.send_message(chat_id=user_chat_id, text=message)
     else:
         logger.warning("No user chat ID set. Unable to send message.")
 
@@ -53,7 +54,7 @@ def fetch_portfolio():
         response = requests.get(API_URL)
         response.raise_for_status()
         portfolio = response.json()
-        logger.debug(f"Portfolio fetched: {portfolio}")
+        logger.info(f"Portfolio fetched successfully. Tokens in portfolio: {len(portfolio.get('portfolios', []))}")
         return portfolio
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching portfolio data: {e}")
@@ -95,8 +96,8 @@ def analyze_changes(current_portfolio, previous_portfolio):
     excluded_symbols = {"USD", "USDT", "USDC"}
     changes = []
 
-    logger.debug(f"Current portfolio for comparison: {current_portfolio}")
-    logger.debug(f"Previous portfolio for comparison: {previous_portfolio}")
+    logger.debug(f"Current portfolio size: {len(current_portfolio.get('portfolios', []))}")
+    logger.debug(f"Previous portfolio size: {len(previous_portfolio.get('portfolios', []))}")
 
     for current_token in current_portfolio.get("portfolios", []):
         if current_token["symbol"] in excluded_symbols:
@@ -148,13 +149,13 @@ def analyze_changes(current_portfolio, previous_portfolio):
 
 async def update_portfolio():
     """Check for portfolio updates periodically and notify on changes."""
-    global previous_portfolio
+    global previous_portfolio, application
     logger.debug(f"[{datetime.now()}] Checking for portfolio updates...")
 
     current_portfolio = fetch_portfolio()
     if current_portfolio:
-        logger.debug(f"Fetched portfolio data during update check: {current_portfolio}")
-        logger.debug(f"Previous portfolio state: {previous_portfolio}")
+        logger.debug(f"Fetched portfolio. Tokens in portfolio: {len(current_portfolio.get('portfolios', []))}")
+        logger.debug(f"Previous portfolio size: {len(previous_portfolio.get('portfolios', [])) if previous_portfolio else 'None'}")
 
         changes = analyze_changes(current_portfolio, previous_portfolio)
         if changes:
@@ -168,7 +169,7 @@ async def update_portfolio():
         else:
             logger.debug("No changes detected in portfolio.")
         previous_portfolio = current_portfolio
-        logger.debug(f"Updated previous_portfolio state: {previous_portfolio}")
+        logger.debug(f"Updated previous_portfolio state.")
     else:
         logger.error("Failed to fetch portfolio data during update check.")
 
@@ -186,7 +187,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Synchronize previous_portfolio
         previous_portfolio = portfolio
-        logger.debug(f"Synchronized previous_portfolio with fetched data: {previous_portfolio}")
+        logger.debug(f"Synchronized previous_portfolio.")
     else:
         logger.error("Failed to fetch portfolio data.")
         await context.bot.send_message(chat_id=user_chat_id, text="Failed to fetch portfolio data. Please try again later.")
@@ -200,6 +201,7 @@ async def webhook_handler(request):
 
 async def main():
     """Main function to start the bot with webhook."""
+    global application  # Declare application as global to make it accessible
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add command and message handlers
